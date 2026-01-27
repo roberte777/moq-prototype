@@ -21,6 +21,7 @@ check:
 demo:
     #!/usr/bin/env bash
     set -e
+    trap 'kill $(jobs -p) 2>/dev/null; wait' INT TERM
     echo "Starting relay on :4443..."
     moq-relay dev/relay.toml &
     sleep 2
