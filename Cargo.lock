@@ -678,6 +678,7 @@ dependencies = [
  "moq-lite",
  "prost",
  "prost-build",
+ "rand",
  "tokio",
  "url",
  "uuid",
