@@ -24,29 +24,15 @@ async fn main() -> Result<()> {
 
     let (_session, producer, consumer) = connect_bidirectional(&url).await?;
 
-    // --- Publish side: create broadcast for our telemetry ---
     let mut broadcast = producer
         .create_broadcast(&drone_path)
         .expect("failed to create drone broadcast");
     let mut position_track = broadcast.create_track(Track::new(POSITION_TRACK));
 
-    // --- Subscribe side: listen for commands addressed to us ---
     let cmd_broadcast = consumer
         .consume_broadcast(&control_path)
         .expect("failed to consume control broadcast");
     let mut cmd_track = cmd_broadcast.subscribe_track(&Track::new(COMMAND_TRACK));
-
-    // Simulated drone state
-    let mut lat = 37.7749;
-    let mut lon = -122.4194;
-    let mut alt = 100.0;
-    let heading = 0.0;
-    let speed = 5.0;
-
-    // Target position (updated by commands)
-    let mut target_lat = lat;
-    let mut target_lon = lon;
-    let mut target_alt = alt;
 
     println!("Drone {drone_id} is online.");
 
@@ -55,22 +41,13 @@ async fn main() -> Result<()> {
     loop {
         tokio::select! {
             _ = ticker.tick() => {
-                // Simulate movement toward target
-                let dlat: f64 = target_lat - lat;
-                let dlon: f64 = target_lon - lon;
-                let dalt: f64 = target_alt - alt;
-                let step: f64 = 0.0001;
-                if dlat.abs() > step { lat += step * dlat.signum(); }
-                if dlon.abs() > step { lon += step * dlon.signum(); }
-                if dalt.abs() > 0.5 { alt += 0.5 * dalt.signum(); }
-
                 let pos = DronePosition {
                     drone_id: drone_id.clone(),
-                    latitude: lat,
-                    longitude: lon,
-                    altitude_m: alt,
-                    heading_deg: heading,
-                    speed_mps: speed,
+                    latitude: 37.7749,
+                    longitude: -122.4194,
+                    altitude_m: 100.0,
+                    heading_deg: 0.0,
+                    speed_mps: 0.0,
                     timestamp: SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .unwrap()
@@ -93,39 +70,13 @@ async fn main() -> Result<()> {
                         while let Ok(Some(frame)) = group.read_frame().await {
                             let cmd = drone_proto::DroneCommand::decode(frame.as_ref())?;
                             println!(
-                                "[RX] command: {:?} -> ({:.6}, {:.6}, {:.1}m)",
+                                "[RX] command: {:?} target=({:.6}, {:.6}, {:.1}m)",
                                 drone_proto::CommandType::try_from(cmd.command)
                                     .unwrap_or(drone_proto::CommandType::Hover),
                                 cmd.target_lat,
                                 cmd.target_lon,
                                 cmd.target_alt_m,
                             );
-
-                            match drone_proto::CommandType::try_from(cmd.command) {
-                                Ok(drone_proto::CommandType::Goto) => {
-                                    target_lat = cmd.target_lat;
-                                    target_lon = cmd.target_lon;
-                                    target_alt = cmd.target_alt_m;
-                                }
-                                Ok(drone_proto::CommandType::Hover) => {
-                                    target_lat = lat;
-                                    target_lon = lon;
-                                    target_alt = alt;
-                                }
-                                Ok(drone_proto::CommandType::Land) => {
-                                    target_alt = 0.0;
-                                    target_lat = lat;
-                                    target_lon = lon;
-                                }
-                                Ok(drone_proto::CommandType::ReturnHome) => {
-                                    target_lat = 37.7749;
-                                    target_lon = -122.4194;
-                                    target_alt = 100.0;
-                                }
-                                Err(_) => {
-                                    println!("[RX] unknown command type: {}", cmd.command);
-                                }
-                            }
                         }
                     }
                     Ok(None) => {
@@ -133,8 +84,6 @@ async fn main() -> Result<()> {
                         break;
                     }
                     Err(e) => {
-                        // Subscription errors are expected when no controller is
-                        // publishing yet. Keep retrying.
                         println!("Command track error (will retry): {e}");
                         tokio::time::sleep(Duration::from_secs(2)).await;
                         cmd_track = cmd_broadcast.subscribe_track(&Track::new(COMMAND_TRACK));
