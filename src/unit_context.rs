@@ -1,40 +1,72 @@
-use moq_lite::{BroadcastProducer, TrackProducer};
 use std::sync::Mutex;
 
+use crate::state_machine::StateMachine;
+use crate::state_machine::command::{CommandInput, CommandOutput, CommandQueueMachine};
+use crate::state_machine::telemetry::{
+    Position, TelemetryInput, TelemetryMachine, TelemetryOutput,
+};
+
 pub struct UnitContext {
-    broadcast_producer: BroadcastProducer,
-    command_track: Mutex<TrackProducer>,
+    command_machine: Mutex<CommandQueueMachine>,
+    telemetry_machine: Mutex<TelemetryMachine>,
 }
 
 impl std::fmt::Debug for UnitContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("UnitContext")
-            .field("broadcast_producer", &"<BroadcastProducer>")
-            .field("command_track", &"<TrackProducer>")
+            .field("command_machine", &"<CommandQueueMachine>")
+            .field("telemetry_machine", &"<TelemetryMachine>")
             .finish()
     }
 }
 
 impl UnitContext {
-    /// Create a new [`UnitContext`] with the given broadcast and command track producers.
-    pub fn new(broadcast_producer: BroadcastProducer, command_track: TrackProducer) -> Self {
+    pub fn new() -> Self {
         Self {
-            broadcast_producer,
-            command_track: Mutex::new(command_track),
+            command_machine: Mutex::new(CommandQueueMachine::new()),
+            telemetry_machine: Mutex::new(TelemetryMachine::new()),
         }
     }
 
-    /// Returns a reference to the broadcast producer.
-    pub fn broadcast_producer(&self) -> &BroadcastProducer {
-        &self.broadcast_producer
+    pub fn enqueue_command(&self, cmd: Vec<u8>) {
+        let mut machine = self
+            .command_machine
+            .lock()
+            .expect("command machine lock poisoned");
+        machine.process_input(CommandInput::Enqueue(cmd));
     }
 
-    /// Write a frame to the command track.
-    pub fn write_command_frame<B: Into<bytes::Bytes>>(&self, frame: B) {
-        let mut track = self
-            .command_track
+    pub fn poll_command(&self) -> Option<Vec<u8>> {
+        let mut machine = self
+            .command_machine
             .lock()
-            .expect("command track lock poisoned");
-        track.write_frame(frame);
+            .expect("command machine lock poisoned");
+        machine.poll_output().map(|out| match out {
+            CommandOutput::Command(bytes) => bytes,
+        })
+    }
+
+    pub fn update_telemetry(&self, pos: Position) {
+        let mut machine = self
+            .telemetry_machine
+            .lock()
+            .expect("telemetry machine lock poisoned");
+        machine.process_input(TelemetryInput::Position(pos));
+    }
+
+    pub fn poll_telemetry(&self) -> Option<Position> {
+        let mut machine = self
+            .telemetry_machine
+            .lock()
+            .expect("telemetry machine lock poisoned");
+        machine.poll_output().map(|out| match out {
+            TelemetryOutput::PositionUpdate(pos) => pos,
+        })
+    }
+}
+
+impl Default for UnitContext {
+    fn default() -> Self {
+        Self::new()
     }
 }
