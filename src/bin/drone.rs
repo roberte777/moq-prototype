@@ -10,6 +10,7 @@ use moq_prototype::{
 use prost::Message;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::interval;
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 #[tokio::main]
@@ -20,9 +21,13 @@ async fn main() -> Result<()> {
     let drone_path = drone_broadcast_path(&drone_id);
     let control_path = control_broadcast_path(&drone_id);
 
-    println!("Drone {drone_id} connecting to relay at {url}");
-    println!("  Publishing position on: {drone_path}/{POSITION_TRACK}");
-    println!("  Listening for commands on: {control_path}/{COMMAND_TRACK}");
+    info!(
+        drone_id = %drone_id,
+        relay = %url,
+        position_path = %format!("{drone_path}/{POSITION_TRACK}"),
+        command_path = %format!("{control_path}/{COMMAND_TRACK}"),
+        "Drone connecting to relay"
+    );
 
     let (_session, producer, mut consumer) = connect_bidirectional(&url).await?;
 
@@ -35,7 +40,7 @@ async fn main() -> Result<()> {
             .await
             .expect("Not able to connect drone");
 
-    println!("Drone {drone_id} is online.");
+    info!(drone_id = %drone_id, "Drone is online");
 
     let mut ticker = interval(Duration::from_secs(1));
 
@@ -59,9 +64,11 @@ async fn main() -> Result<()> {
                 pos.encode(&mut buf)?;
                 position_track.write_frame(buf);
 
-                println!(
-                    "[TX] position: lat={:.6}, lon={:.6}, alt={:.1}m",
-                    pos.latitude, pos.longitude, pos.altitude_m
+                debug!(
+                    lat = pos.latitude,
+                    lon = pos.longitude,
+                    alt = pos.altitude_m,
+                    "Sent position"
                 );
             }
 
@@ -70,22 +77,22 @@ async fn main() -> Result<()> {
                     Ok(Some(mut group)) => {
                         while let Ok(Some(frame)) = group.read_frame().await {
                             let cmd = drone_proto::DroneCommand::decode(frame.as_ref())?;
-                            println!(
-                                "[RX] command: {:?} target=({:.6}, {:.6}, {:.1}m)",
-                                drone_proto::CommandType::try_from(cmd.command)
+                            debug!(
+                                command = ?drone_proto::CommandType::try_from(cmd.command)
                                     .unwrap_or(drone_proto::CommandType::Hover),
-                                cmd.target_lat,
-                                cmd.target_lon,
-                                cmd.target_alt_m,
+                                target_lat = cmd.target_lat,
+                                target_lon = cmd.target_lon,
+                                target_alt = cmd.target_alt_m,
+                                "Received command"
                             );
                         }
                     }
                     Ok(None) => {
-                        println!("Command track closed");
+                        info!("Command track closed");
                         break;
                     }
                     Err(e) => {
-                        println!("Command track error (will retry): {e}");
+                        warn!(error = %e, "Command track error, retrying");
                         tokio::time::sleep(Duration::from_secs(2)).await;
                         cmd_track = cmd_broadcast.subscribe_track(&Track::new(COMMAND_TRACK));
                     }
@@ -106,7 +113,6 @@ async fn connect_drone(
     let cmd_broadcast: BroadcastConsumer = loop {
         match consumer.announced().await {
             Some((ref p, Some(bc))) if p.as_str() == control_path => {
-                println!("Path: {p}");
                 break Ok(bc);
             }
             Some((ref p, None)) if p.as_str() == control_path => {

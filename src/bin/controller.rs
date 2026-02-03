@@ -13,6 +13,7 @@ use prost::Message;
 use rand::Rng;
 use std::sync::Arc;
 use std::time::Duration;
+use tracing::{debug, error, info, warn};
 
 const GRPC_ADDR: &str = "[::1]:50051";
 
@@ -31,14 +32,14 @@ async fn main() -> Result<()> {
     let server_session_map = Arc::clone(&session_map);
     tokio::spawn(async move {
         if let Err(e) = grpc::start_server(grpc_addr, server_unit_map, server_session_map).await {
-            eprintln!("[!] gRPC server error: {e}");
+            error!("gRPC server error: {e}");
         }
     });
 
     // Wait for server to start
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-    println!("Controller connecting to relay at {url}");
+    info!("Controller connecting to relay at {url}");
 
     let (_session, producer, consumer) = connect_bidirectional(&url).await?;
     let producer = Arc::new(producer);
@@ -47,13 +48,13 @@ async fn main() -> Result<()> {
         .with_root("drone/")
         .expect("drone prefix not authorized");
 
-    println!("Waiting for drones to connect...");
+    info!("Waiting for drones to connect...");
 
     loop {
         match drone_announcements.announced().await {
             Some((path, Some(broadcast))) => {
                 let drone_id = path.to_string();
-                println!("[+] Drone discovered: {drone_id}");
+                info!(drone_id = %drone_id, "Drone discovered");
 
                 spawn_drone_bridge(drone_id.clone(), broadcast, Arc::clone(&producer));
                 spawn_random_command_task(drone_id, Arc::clone(&session_map));
@@ -62,12 +63,12 @@ async fn main() -> Result<()> {
             // Drone disconnects
             Some((path, None)) => {
                 let drone_id = path.to_string();
-                println!("[-] Drone departed: {drone_id}");
+                info!(drone_id = %drone_id, "Drone departed");
                 // stuff cleans up when streams start closing
             }
 
             None => {
-                println!("Announcement stream closed");
+                info!("Announcement stream closed");
                 break;
             }
         }
@@ -84,7 +85,7 @@ fn spawn_drone_bridge(
     tokio::spawn(async move {
         // FIXME: how tf do I report errors back to the drone
         if let Err(e) = run_drone_bridge(drone_id.clone(), broadcast, producer).await {
-            eprintln!("[!] Bridge error for {drone_id}: {e}");
+            error!(drone_id = %drone_id, error = %e, "Bridge error");
         }
     });
 }
@@ -112,9 +113,12 @@ async fn run_drone_bridge(
                 Ok(Some(mut group)) => {
                     while let Ok(Some(frame)) = group.read_frame().await {
                         if let Ok(pos) = DronePosition::decode(frame.as_ref()) {
-                            println!(
-                                "[RX {drone_id_clone}] lat={:.6} lon={:.6} alt={:.1}m",
-                                pos.latitude, pos.longitude, pos.altitude_m,
+                            debug!(
+                                drone_id = %drone_id_clone,
+                                lat = pos.latitude,
+                                lon = pos.longitude,
+                                alt = pos.altitude_m,
+                                "Received position"
                             );
                             let msg = DroneMessage {
                                 payload: Some(Payload::Position(pos)),
@@ -124,11 +128,11 @@ async fn run_drone_bridge(
                     }
                 }
                 Ok(None) => {
-                    println!("[-] Telemetry stream closed for {drone_id_clone}");
+                    info!(drone_id = %drone_id_clone, "Telemetry stream closed");
                     break;
                 }
                 Err(e) => {
-                    println!("[!] Telemetry stream error for {drone_id_clone}: {e}");
+                    warn!(drone_id = %drone_id_clone, error = %e, "Telemetry stream error");
                     break;
                 }
             }
@@ -137,18 +141,18 @@ async fn run_drone_bridge(
     let response = client.drone_session(stream).await?;
     let mut command_stream = response.into_inner();
 
-    println!("[*] Bridge established for {drone_id}");
+    info!(drone_id = %drone_id, "Bridge established");
 
     while let Some(msg) = command_stream.message().await? {
         if let Some(Payload::Command(cmd)) = msg.payload {
-            println!("[TX {drone_id}] command: {:?}", cmd.command);
+            debug!(drone_id = %drone_id, command = ?cmd.command, "Sending command");
             let mut buf = Vec::with_capacity(cmd.encoded_len());
             cmd.encode(&mut buf)?;
             cmd_track.write_frame(buf);
         }
     }
 
-    println!("[*] Bridge closed for {drone_id}");
+    info!(drone_id = %drone_id, "Bridge closed");
 
     Ok(())
 }
@@ -158,7 +162,7 @@ async fn run_drone_bridge(
 fn spawn_random_command_task(drone_id: String, session_map: Arc<DroneSessionMap>) {
     tokio::spawn(async move {
         if let Err(e) = run_random_command_task(drone_id.clone(), session_map).await {
-            eprintln!("[!] Random command task error for {drone_id}: {e}");
+            error!(drone_id = %drone_id, error = %e, "Random command task error");
         }
     });
 }
@@ -173,17 +177,17 @@ async fn run_random_command_task(
     let unit_id = UnitId::from(drone_id.as_str());
 
     if !session_map.has_active_session(&unit_id) {
-        println!("[CMD {drone_id}] Drone not connected, skipping random command task");
+        debug!(drone_id = %drone_id, "Drone not connected, skipping random command task");
         return Ok(());
     }
 
     let mut client = DroneServiceClient::connect(format!("http://{GRPC_ADDR}")).await?;
 
-    println!("[CMD {drone_id}] Random command task started");
+    info!(drone_id = %drone_id, "Random command task started");
 
     loop {
         if !session_map.has_active_session(&unit_id) {
-            println!("[CMD {drone_id}] Drone disconnected, stopping random command task");
+            info!(drone_id = %drone_id, "Drone disconnected, stopping random command task");
             break;
         }
 
@@ -194,18 +198,20 @@ async fn run_random_command_task(
             Ok(response) => {
                 let ack = response.into_inner();
                 if ack.accepted {
-                    println!("[CMD {drone_id}] Sent random command: {command_type:?}");
+                    debug!(drone_id = %drone_id, command = ?command_type, "Sent random command");
                 } else {
-                    println!(
-                        "[CMD {drone_id}] Command rejected: {:?} - {}",
-                        command_type, ack.message
+                    warn!(
+                        drone_id = %drone_id,
+                        command = ?command_type,
+                        message = %ack.message,
+                        "Command rejected"
                     );
                 }
             }
             Err(e) => {
-                println!("[CMD {drone_id}] Failed to send command: {e}");
+                warn!(drone_id = %drone_id, error = %e, "Failed to send command");
                 if !session_map.has_active_session(&unit_id) {
-                    println!("[CMD {drone_id}] Drone disconnected, stopping random command task");
+                    info!(drone_id = %drone_id, "Drone disconnected, stopping random command task");
                     break;
                 }
             }
@@ -214,7 +220,7 @@ async fn run_random_command_task(
         tokio::time::sleep(RANDOM_COMMAND_INTERVAL).await;
     }
 
-    println!("[CMD {drone_id}] Random command task stopped");
+    info!(drone_id = %drone_id, "Random command task stopped");
     Ok(())
 }
 

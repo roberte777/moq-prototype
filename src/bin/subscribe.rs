@@ -1,6 +1,7 @@
 use anyhow::Result;
 use moq_lite::{Client, Origin, Track};
 use prost::Message;
+use tracing::{debug, info};
 use url::Url;
 use web_transport_quinn::ClientBuilder;
 
@@ -14,8 +15,12 @@ async fn main() -> Result<()> {
     let broadcast_path = std::env::var("BROADCAST_PATH").unwrap_or_else(|_| "sensors".to_string());
     let track_name = std::env::var("TRACK_NAME").unwrap_or_else(|_| "temperature".to_string());
 
-    println!("Connecting to relay at {url}");
-    println!("Subscribing to broadcast: {broadcast_path}, track: {track_name}");
+    info!(
+        relay = %url,
+        broadcast = %broadcast_path,
+        track = %track_name,
+        "Connecting to relay"
+    );
 
     let origin = Origin::produce();
 
@@ -35,20 +40,27 @@ async fn main() -> Result<()> {
 
     let mut track = broadcast.subscribe_track(&Track::new(&track_name));
 
-    println!("Waiting for data on {broadcast_path}/{track_name}...");
+    info!(
+        broadcast = %broadcast_path,
+        track = %track_name,
+        "Waiting for data"
+    );
 
     while let Ok(Some(mut group)) = track.next_group().await {
         let sequence = group.info.sequence;
 
         while let Ok(Some(frame)) = group.read_frame().await {
             let data = telemetry::SensorData::decode(frame.as_ref())?;
-            println!(
-                "Received group {sequence}: sensor={}, temp={:.1}C, ts={}",
-                data.sensor_id, data.temperature, data.timestamp
+            debug!(
+                sequence = sequence,
+                sensor_id = %data.sensor_id,
+                temperature = data.temperature,
+                timestamp = data.timestamp,
+                "Received group"
             );
         }
     }
 
-    println!("Track closed");
+    info!("Track closed");
     Ok(())
 }

@@ -6,6 +6,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use prost::Message;
 use tonic::{Request, Response, Status, Streaming};
+use tracing::{debug, error, info, warn};
 
 use crate::drone::DroneSessionMap;
 use crate::drone_proto::drone_message::Payload;
@@ -23,7 +24,7 @@ pub async fn start_server(
 ) -> anyhow::Result<()> {
     let service = DroneServiceImpl::new(unit_map, session_map);
 
-    println!("[gRPC] Server starting on {addr}");
+    info!(address = %addr, "gRPC server starting");
 
     tonic::transport::Server::builder()
         .add_service(DroneServiceServer::new(service))
@@ -72,7 +73,7 @@ impl DroneService for DroneServiceImpl {
 
         let unit_id = UnitId::from(drone_id.as_str());
 
-        println!("[gRPC] DroneSession started for {drone_id}");
+        info!(drone_id = %drone_id, "DroneSession started");
 
         // Create or reuse unit context
         if self.unit_map.get_unit(&unit_id).is_err() {
@@ -80,12 +81,11 @@ impl DroneService for DroneServiceImpl {
             self.unit_map
                 .insert_unit(unit_id.clone(), context)
                 .map_err(|e| Status::internal(e.to_string()))?;
-            println!("[gRPC] Created UnitContext for {drone_id}");
         }
 
         match self.session_map.create_session(&unit_id) {
             Ok(session_id) => {
-                println!("[gRPC] Session created for {drone_id}: {session_id}");
+                info!(drone_id = %drone_id, session_id = %session_id, "Session created");
             }
             Err(e) => {
                 return Err(Status::already_exists(e.to_string()));
@@ -127,14 +127,14 @@ impl DroneService for DroneServiceImpl {
                     }
                     Ok(_) => {}
                     Err(e) => {
-                        println!("[gRPC] Telemetry stream error for {drone_id_for_task}: {e}");
+                        warn!(drone_id = %drone_id_for_task, error = %e, "Telemetry stream error");
                         break;
                     }
                 }
             }
 
             // Cleanup on disconnect
-            println!("[gRPC] Telemetry stream closed for {drone_id_for_task}");
+            info!(drone_id = %drone_id_for_task, "Telemetry stream closed");
             let _ = telemetry_session_map.remove_session(&unit_id_for_telemetry);
         });
 
@@ -146,7 +146,7 @@ impl DroneService for DroneServiceImpl {
         let outbound = async_stream::stream! {
             loop {
                 if !session_map_for_stream.has_active_session(&unit_id_for_stream) {
-                    println!("[gRPC] Session ended, closing command stream for {drone_id_for_stream}");
+                    debug!(drone_id = %drone_id_for_stream, "Session ended, closing command stream");
                     break;
                 }
 
@@ -160,13 +160,13 @@ impl DroneService for DroneServiceImpl {
                 if let Some(cmd_bytes) = maybe_cmd {
                     match DroneCommand::decode(cmd_bytes.as_slice()) {
                         Ok(cmd) => {
-                            println!("[gRPC] Sending command to {drone_id_for_stream}: {:?}", cmd.command);
+                            debug!(drone_id = %drone_id_for_stream, command = ?cmd.command, "Sending command");
                             yield Ok(DroneMessage {
                                 payload: Some(Payload::Command(cmd)),
                             });
                         }
                         Err(e) => {
-                            println!("[gRPC] Failed to decode command: {e}");
+                            error!(error = %e, "Failed to decode command");
                         }
                     }
                 }
@@ -205,9 +205,10 @@ impl DroneService for DroneServiceImpl {
             .view(|ctx| ctx.enqueue_command(buf))
             .map_err(|e| Status::internal(e.to_string()))?;
 
-        println!(
-            "[gRPC] Command enqueued for {}: {:?}",
-            cmd.drone_id, cmd.command
+        debug!(
+            drone_id = %cmd.drone_id,
+            command = ?cmd.command,
+            "Command enqueued"
         );
 
         Ok(Response::new(CommandAck {
