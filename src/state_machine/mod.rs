@@ -1,5 +1,4 @@
-pub mod command;
-pub mod telemetry;
+pub mod echo;
 pub mod wrappers;
 
 /// The [`StateMachine`] trait provides calling semantics and indicates the upholding of invariants

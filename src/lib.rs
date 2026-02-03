@@ -15,19 +15,18 @@ pub mod drone_proto {
 }
 
 /// Broadcast path for a drone's outbound telemetry.
-/// Published by the drone, subscribed to by the controller.
+/// Published by the drone, subscribed to by the server.
 pub fn drone_broadcast_path(drone_id: &str) -> String {
     format!("drone/{drone_id}")
 }
 
-/// Broadcast path for inbound commands to a drone.
-/// Published by the controller, subscribed to by the drone.
-pub fn control_broadcast_path(drone_id: &str) -> String {
-    format!("control/{drone_id}")
+/// Broadcast path for echoed positions sent to a drone.
+/// Published by the server, subscribed to by the drone.
+pub fn echo_broadcast_path(drone_id: &str) -> String {
+    format!("server/{drone_id}")
 }
 
-pub const POSITION_TRACK: &str = "position";
-pub const COMMAND_TRACK: &str = "commands";
+pub const PRIMARY_TRACK: &str = "primary";
 
 /// Connect to the relay as a publisher + subscriber (bidirectional).
 /// Returns the session handle and the origin producer/consumer pair.

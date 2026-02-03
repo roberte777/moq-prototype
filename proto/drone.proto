@@ -13,41 +13,6 @@ message DronePosition {
   uint64 timestamp = 7;
 }
 
-// Sent by the controller to command a drone.
-message DroneCommand {
-  string drone_id = 1;
-  CommandType command = 2;
-  // Target position for GOTO commands.
-  double target_lat = 3;
-  double target_lon = 4;
-  double target_alt_m = 5;
-  uint64 timestamp = 6;
-}
-
-enum CommandType {
-  GOTO = 0;
-  HOVER = 1;
-  LAND = 2;
-  RETURN_HOME = 3;
-}
-
-// Wrapper for bidirectional streaming between MoQ bridge and gRPC service
-message DroneMessage {
-  oneof payload {
-    DronePosition position = 1;
-    DroneCommand command = 2;
-  }
-}
-
-message CommandAck {
-  bool accepted = 1;
-  string message = 2;
-}
-
-service DroneService {
-  // Inbound: telemetry from MoQ bridge
-  // Outbound: commands to MoQ bridge
-  rpc DroneSession(stream DroneMessage) returns (stream DroneMessage);
-
-  rpc SendCommand(DroneCommand) returns (CommandAck);
+service EchoService {
+  rpc Echo(stream DronePosition) returns (stream DronePosition);
 }

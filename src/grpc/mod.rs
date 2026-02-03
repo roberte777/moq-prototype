@@ -2,4 +2,4 @@ mod server;
 
 pub use server::start_server;
 
-pub use crate::drone_proto::drone_service_client::DroneServiceClient;
+pub use crate::drone_proto::echo_service_client::EchoServiceClient;

@@ -2,11 +2,9 @@ use anyhow::{Result, anyhow};
 use moq_lite::{
     BroadcastConsumer, BroadcastProducer, OriginConsumer, Track, TrackConsumer, TrackProducer,
 };
-use moq_prototype::drone_proto::{self, DronePosition};
-use moq_prototype::{
-    COMMAND_TRACK, POSITION_TRACK, connect_bidirectional, control_broadcast_path,
-    drone_broadcast_path,
-};
+use moq_prototype::PRIMARY_TRACK;
+use moq_prototype::drone_proto::DronePosition;
+use moq_prototype::{connect_bidirectional, drone_broadcast_path, echo_broadcast_path};
 use prost::Message;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::interval;
@@ -15,17 +13,18 @@ use uuid::Uuid;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
     let url = std::env::var("RELAY_URL").unwrap_or_else(|_| "https://localhost:4443".to_string());
     let drone_id = std::env::var("DRONE_ID").unwrap_or_else(|_| Uuid::new_v4().to_string());
 
     let drone_path = drone_broadcast_path(&drone_id);
-    let control_path = control_broadcast_path(&drone_id);
+    let server_path = echo_broadcast_path(&drone_id);
 
     info!(
         drone_id = %drone_id,
         relay = %url,
-        position_path = %format!("{drone_path}/{POSITION_TRACK}"),
-        command_path = %format!("{control_path}/{COMMAND_TRACK}"),
+        position_path = %format!("{drone_path}/{PRIMARY_TRACK}"),
+        command_path = %format!("{server_path}/{PRIMARY_TRACK}"),
         "Drone connecting to relay"
     );
 
@@ -35,8 +34,8 @@ async fn main() -> Result<()> {
         .create_broadcast(&drone_path)
         .expect("failed to create drone broadcast");
 
-    let (cmd_broadcast, mut position_track, mut cmd_track) =
-        connect_drone(&mut broadcast, &mut consumer, &control_path)
+    let (echo_broadcast, mut position_track, mut echo_track) =
+        connect_drone(&mut broadcast, &mut consumer, &server_path)
             .await
             .expect("Not able to connect drone");
 
@@ -72,29 +71,23 @@ async fn main() -> Result<()> {
                 );
             }
 
-            result = cmd_track.next_group() => {
+            result = echo_track.next_group() => {
                 match result {
                     Ok(Some(mut group)) => {
-                        while let Ok(Some(frame)) = group.read_frame().await {
-                            let cmd = drone_proto::DroneCommand::decode(frame.as_ref())?;
-                            debug!(
-                                command = ?drone_proto::CommandType::try_from(cmd.command)
-                                    .unwrap_or(drone_proto::CommandType::Hover),
-                                target_lat = cmd.target_lat,
-                                target_lon = cmd.target_lon,
-                                target_alt = cmd.target_alt_m,
-                                "Received command"
+                        while let Ok(Some(_)) = group.read_frame().await {
+                            info!(
+                                "Received echo"
                             );
                         }
                     }
                     Ok(None) => {
-                        info!("Command track closed");
+                        info!("Echo track closed");
                         break;
                     }
                     Err(e) => {
-                        warn!(error = %e, "Command track error, retrying");
+                        warn!(error = %e, "Echo track error, retrying");
                         tokio::time::sleep(Duration::from_secs(2)).await;
-                        cmd_track = cmd_broadcast.subscribe_track(&Track::new(COMMAND_TRACK));
+                        echo_track = echo_broadcast.subscribe_track(&Track::new(PRIMARY_TRACK));
                     }
                 }
             }
@@ -107,21 +100,21 @@ async fn main() -> Result<()> {
 async fn connect_drone(
     broadcast: &mut BroadcastProducer,
     consumer: &mut OriginConsumer,
-    control_path: &str,
+    server_path: &str,
 ) -> Result<(BroadcastConsumer, TrackProducer, TrackConsumer)> {
-    let position_track = broadcast.create_track(Track::new(POSITION_TRACK));
-    let cmd_broadcast: BroadcastConsumer = loop {
+    let position_track = broadcast.create_track(Track::new(PRIMARY_TRACK));
+    let echo_broadcast: BroadcastConsumer = loop {
         match consumer.announced().await {
-            Some((ref p, Some(bc))) if p.as_str() == control_path => {
+            Some((ref p, Some(bc))) if p.as_str() == server_path => {
                 break Ok(bc);
             }
-            Some((ref p, None)) if p.as_str() == control_path => {
-                break Err(anyhow!("Control path found but value is None"));
+            Some((ref p, None)) if p.as_str() == server_path => {
+                break Err(anyhow!("Server path found but value is None"));
             }
             Some(_) => continue,
-            None => break Err(anyhow!("Control path not found")),
+            None => break Err(anyhow!("Server path not found")),
         }
     }?;
-    let cmd_track = cmd_broadcast.subscribe_track(&Track::new(COMMAND_TRACK));
-    Ok((cmd_broadcast, position_track, cmd_track))
+    let echo_track = echo_broadcast.subscribe_track(&Track::new(PRIMARY_TRACK));
+    Ok((echo_broadcast, position_track, echo_track))
 }

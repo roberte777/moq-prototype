@@ -34,7 +34,7 @@ demo:
     echo "Demo running. Press Ctrl+C to stop."
     wait
 
-# Run the drone demo: relay + drone, then use `just control` to connect
+# Run the drone demo: relay + drone, then use `just server` to connect
 drone-demo:
     #!/usr/bin/env bash
     set -e
@@ -44,7 +44,7 @@ drone-demo:
     moq-relay dev/relay.toml &
     sleep 2
     echo "Starting drone with ID: $DRONE_ID"
-    echo "  Run 'just control' in another terminal to send commands."
+    echo "  Run 'just server' in another terminal to send commands."
     DRONE_ID=$DRONE_ID cargo run --bin drone
     wait
 
@@ -64,6 +64,6 @@ subscribe:
 drone *args:
     cargo run --bin drone {{ args }}
 
-# Start the controller (auto-discovers all drones)
-control:
-    cargo run --bin controller
+# Start the server (auto-discovers all drones)
+server:
+    cargo run --bin server
