@@ -85,7 +85,7 @@ impl RpcRouter {
         let mut announcements = self
             .consumer
             .with_root(&prefix)
-            .ok_or_else(|| RpcError::Moq(format!("prefix '{prefix}' not authorized")))?;
+            .ok_or_else(|| RpcError::Unauthorized(format!("prefix '{prefix}' not authorized")))?;
 
         info!(prefix = %prefix, "RPC router started, listening for announcements");
 

@@ -160,9 +160,7 @@ impl RpcClient {
             }
         };
 
-        tokio::time::timeout(timeout, wait_fut)
-            .await
-            .map_err(|_| RpcError::Timeout)?
+        tokio::time::timeout(timeout, wait_fut).await?
     }
 
     /// Get the client ID.
