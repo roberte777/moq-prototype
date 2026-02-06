@@ -40,13 +40,11 @@ async fn main() -> Result<()> {
     let (_session, producer, consumer) = connect_bidirectional(&url).await?;
     let producer = Arc::new(producer);
 
-    let config = RpcRouterConfig {
-        // FIXME: Currently panics if a broadcast is announced that does not have
-        // the prefix. This is being fixed in the library and will work soonTM
-        client_prefix: String::from("drone"),
-        response_prefix: String::from("server"),
-        track_name: String::from(PRIMARY_TRACK),
-    };
+    let config = RpcRouterConfig::builder()
+        .client_prefix("drone".to_string())
+        .response_prefix("server".to_string())
+        .track_name(PRIMARY_TRACK.to_string())
+        .build();
 
     let mut router = RpcRouter::new(consumer.clone(), producer.clone(), config);
 

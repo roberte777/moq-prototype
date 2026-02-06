@@ -12,7 +12,7 @@
 //! ```ignore
 //! use rpcmoq_lite::{RpcRouter, RpcRouterConfig, DecodedInbound};
 //!
-//! let mut router = RpcRouter::new(consumer, producer, RpcRouterConfig::default());
+//! let mut router = RpcRouter::new(consumer, producer, RpcRouterConfig::builder().build());
 //!
 //! router.register::<Request, Response, _, _, _>(
 //!     "package.Service/Method",
@@ -35,9 +35,11 @@
 //! use rpcmoq_lite::{RpcClient, RpcClientConfig};
 //! use futures::{SinkExt, StreamExt};
 //!
-//! let config = RpcClientConfig::new("client-123")
-//!     .with_client_prefix("drone")
-//!     .with_server_prefix("server");
+//! let config = RpcClientConfig::builder()
+//!     .client_id("client-123")
+//!     .client_prefix("drone".to_string())
+//!     .server_prefix("server".to_string())
+//!     .build();
 //!
 //! let mut client = RpcClient::new(producer, consumer, config);
 //!

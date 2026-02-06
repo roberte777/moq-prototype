@@ -24,11 +24,13 @@ async fn main() -> Result<()> {
 
     let (_session, producer, consumer) = connect_bidirectional(&url).await?;
 
-    let config = RpcClientConfig::new(&drone_id)
-        .with_client_prefix("drone")
-        .with_server_prefix("server")
-        .with_track_name(PRIMARY_TRACK)
-        .with_timeout(Duration::from_secs(60));
+    let config = RpcClientConfig::builder()
+        .client_id(drone_id.clone())
+        .client_prefix("drone".to_string())
+        .server_prefix("server".to_string())
+        .track_name(PRIMARY_TRACK.to_string())
+        .timeout(Duration::from_secs(60))
+        .build();
 
     let mut client = RpcClient::new(Arc::new(producer), consumer, config);
 

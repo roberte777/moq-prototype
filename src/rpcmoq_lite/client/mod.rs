@@ -9,9 +9,11 @@
 //! use rpcmoq_lite::client::{RpcClient, RpcClientConfig};
 //! use futures::{SinkExt, StreamExt};
 //!
-//! let config = RpcClientConfig::new("drone-123")
-//!     .with_client_prefix("drone")
-//!     .with_server_prefix("server");
+//! let config = RpcClientConfig::builder()
+//!     .client_id("drone-123")
+//!     .client_prefix("drone".to_string())
+//!     .server_prefix("server".to_string())
+//!     .build();
 //!
 //! let mut client = RpcClient::new(producer, consumer, config);
 //!

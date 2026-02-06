@@ -80,7 +80,7 @@ impl RpcRouter {
     /// This method consumes the router and runs until the consumer is closed
     /// or a fatal error occurs. Handler tasks continue to run independently.
     pub async fn run(self) -> Result<(), RpcError> {
-        let prefix = self.config.client_prefix.clone();
+        let prefix = self.config.client_prefix().to_string();
 
         let mut announcements = self
             .consumer
@@ -141,7 +141,9 @@ impl RpcRouter {
         // Create the response broadcast
         let response_path = format!(
             "{}/{}/{}",
-            self.config.response_prefix, client_id, grpc_path
+            self.config.response_prefix(),
+            client_id,
+            grpc_path
         );
         let mut response_broadcast =
             self.producer
