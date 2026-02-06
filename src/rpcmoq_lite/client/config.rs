@@ -8,14 +8,14 @@ pub struct RpcClientConfig {
     /// Unique client identifier.
     pub client_id: String,
 
-    /// Prefix for client broadcasts (e.g., "drone").
-    /// Client broadcasts are created at `{client_prefix}/{client_id}/{grpc_path}`.
-    /// Defaults to "client" if not specified.
+    /// Optional prefix for client broadcasts (e.g., "drone").
+    /// If set, client broadcasts are created at `{client_prefix}/{client_id}/{grpc_path}`.
+    /// If not set, broadcasts are created at `{client_id}/{grpc_path}`.
     pub client_prefix: Option<String>,
 
-    /// Prefix for server responses (e.g., "server").
-    /// Client subscribes to server responses at `{server_prefix}/{client_id}/{grpc_path}`.
-    /// Defaults to "server" if not specified.
+    /// Optional prefix for server responses (e.g., "server").
+    /// If set, client subscribes to server responses at `{server_prefix}/{client_id}/{grpc_path}`.
+    /// If not set, subscribes at `{client_id}/{grpc_path}`.
     pub server_prefix: Option<String>,
 
     /// Track name for RPC messages (e.g., "primary").
@@ -30,13 +30,17 @@ pub struct RpcClientConfig {
 impl RpcClientConfig {
     /// Build the client broadcast path for a given gRPC path.
     pub(crate) fn client_path(&self, grpc_path: &str) -> String {
-        let prefix = self.client_prefix.as_deref().unwrap_or("client");
-        format!("{}/{}/{}", prefix, self.client_id, grpc_path)
+        match &self.client_prefix {
+            Some(prefix) => format!("{}/{}/{}", prefix, self.client_id, grpc_path),
+            None => format!("{}/{}", self.client_id, grpc_path),
+        }
     }
 
     /// Build the expected server response path for a given gRPC path.
     pub(crate) fn server_path(&self, grpc_path: &str) -> String {
-        let prefix = self.server_prefix.as_deref().unwrap_or("server");
-        format!("{}/{}/{}", prefix, self.client_id, grpc_path)
+        match &self.server_prefix {
+            Some(prefix) => format!("{}/{}/{}", prefix, self.client_id, grpc_path),
+            None => format!("{}/{}", self.client_id, grpc_path),
+        }
     }
 }

@@ -80,14 +80,23 @@ impl RpcRouter {
     /// This method consumes the router and runs until the consumer is closed
     /// or a fatal error occurs. Handler tasks continue to run independently.
     pub async fn run(self) -> Result<(), RpcError> {
-        let prefix = self.config.client_prefix().to_string();
+        // Extract fields we need before consuming consumer
+        let producer = self.producer;
+        let sessions = self.sessions;
+        let handlers = self.handlers;
+        let config = self.config;
 
-        let mut announcements = self
-            .consumer
-            .with_root(&prefix)
-            .ok_or_else(|| RpcError::Unauthorized(format!("prefix '{prefix}' not authorized")))?;
+        let mut announcements = match &config.client_prefix {
+            Some(prefix) => self.consumer.with_root(prefix).ok_or_else(|| {
+                RpcError::Unauthorized(format!("prefix '{prefix}' not authorized"))
+            })?,
+            None => self.consumer,
+        };
 
-        info!(prefix = %prefix, "RPC router started, listening for announcements");
+        info!(
+            prefix = ?config.client_prefix,
+            "RPC router started, listening for announcements"
+        );
 
         loop {
             match announcements.announced().await {
@@ -95,7 +104,9 @@ impl RpcRouter {
                     let path_str = path.to_string();
                     debug!(path = %path_str, "Received announcement");
 
-                    if let Err(e) = self.handle_announcement(&path_str, broadcast) {
+                    if let Err(e) =
+                        Self::handle_announcement(&producer, &sessions, &handlers, &config, &path_str, broadcast)
+                    {
                         warn!(path = %path_str, error = %e, "Failed to handle announcement");
                     }
                 }
@@ -117,7 +128,10 @@ impl RpcRouter {
 
     /// Handle a new client announcement.
     fn handle_announcement(
-        &self,
+        producer: &Arc<OriginProducer>,
+        sessions: &Arc<SessionMap>,
+        handlers: &HashMap<String, Arc<dyn ErasedHandler>>,
+        config: &RpcRouterConfig,
         path: &str,
         broadcast: BroadcastConsumer,
     ) -> Result<(), RpcError> {
@@ -125,7 +139,7 @@ impl RpcRouter {
         let client_id = request_path.client_id.clone();
         let grpc_path = request_path.grpc_path.full_path();
 
-        let handler = self.handlers.get(&grpc_path).ok_or_else(|| {
+        let handler = handlers.get(&grpc_path).ok_or_else(|| {
             warn!(
                 client_id = %client_id,
                 grpc_path = %grpc_path,
@@ -136,26 +150,18 @@ impl RpcRouter {
 
         // Try to create a session (prevents duplicate connections)
         let session_key = SessionKey::new(&client_id, &grpc_path);
-        let session_guard = self.sessions.try_create(session_key)?;
+        let session_guard = sessions.try_create(session_key)?;
 
         // Create the response broadcast
-        let response_path = format!(
-            "{}/{}/{}",
-            self.config.response_prefix(),
-            client_id,
-            grpc_path
-        );
-        let mut response_broadcast =
-            self.producer
-                .create_broadcast(&response_path)
-                .ok_or_else(|| {
-                    RpcError::BroadcastCreate(format!(
-                        "failed to create response broadcast at '{response_path}'"
-                    ))
-                })?;
+        let response_path = config.response_path(&client_id, &grpc_path);
+        let mut response_broadcast = producer.create_broadcast(&response_path).ok_or_else(|| {
+            RpcError::BroadcastCreate(format!(
+                "failed to create response broadcast at '{response_path}'"
+            ))
+        })?;
 
-        let inbound = RpcInbound::new(&broadcast, &self.config.track_name);
-        let outbound_track = response_broadcast.create_track(Track::new(&self.config.track_name));
+        let inbound = RpcInbound::new(&broadcast, &config.track_name);
+        let outbound_track = response_broadcast.create_track(Track::new(&config.track_name));
         let outbound = RpcOutbound::new(outbound_track);
 
         info!(

@@ -3,14 +3,14 @@ use bon::Builder;
 /// Configuration for the RPC router.
 #[derive(Debug, Clone, Builder)]
 pub struct RpcRouterConfig {
-    /// Prefix for client announcements (e.g., "drone").
-    /// The router listens for announcements under this prefix.
-    /// Defaults to "client" if not specified.
+    /// Optional prefix for client announcements (e.g., "drone").
+    /// If set, the router listens for announcements under this prefix.
+    /// If not set, listens at the root level.
     pub client_prefix: Option<String>,
 
-    /// Prefix for server responses (e.g., "server").
-    /// Responses are published at `{response_prefix}/{client_id}/{grpc_path}`.
-    /// Defaults to "server" if not specified.
+    /// Optional prefix for server responses (e.g., "server").
+    /// If set, responses are published at `{response_prefix}/{client_id}/{grpc_path}`.
+    /// If not set, responses are published at `{client_id}/{grpc_path}`.
     pub response_prefix: Option<String>,
 
     /// Track name for RPC messages (e.g., "primary").
@@ -19,13 +19,11 @@ pub struct RpcRouterConfig {
 }
 
 impl RpcRouterConfig {
-    /// Get the client prefix, defaulting to "client".
-    pub fn client_prefix(&self) -> &str {
-        self.client_prefix.as_deref().unwrap_or("client")
-    }
-
-    /// Get the response prefix, defaulting to "server".
-    pub fn response_prefix(&self) -> &str {
-        self.response_prefix.as_deref().unwrap_or("server")
+    /// Build the response path for a client/rpc combination.
+    pub(crate) fn response_path(&self, client_id: &str, grpc_path: &str) -> String {
+        match &self.response_prefix {
+            Some(prefix) => format!("{}/{}/{}", prefix, client_id, grpc_path),
+            None => format!("{}/{}", client_id, grpc_path),
+        }
     }
 }

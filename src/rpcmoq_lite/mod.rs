@@ -58,13 +58,21 @@
 //!
 //! ## Path Format
 //!
-//! Clients announce at: `{client_prefix}/{client_id}/{package}.{service}/{method}`
+//! When prefixes are set:
+//! - Client announces at: `{client_prefix}/{client_id}/{package}.{service}/{method}`
+//! - Server responds at: `{server_prefix}/{client_id}/{package}.{service}/{method}`
 //!
-//! Server responds at: `{server_prefix}/{client_id}/{package}.{service}/{method}`
+//! When prefixes are omitted:
+//! - Client announces at: `{client_id}/{package}.{service}/{method}`
+//! - Server responds at: `{client_id}/{package}.{service}/{method}`
 //!
-//! Example:
+//! Example with prefixes:
 //! - Client announces: `drone/drone-123/drone.EchoService/Echo`
 //! - Server responds: `server/drone-123/drone.EchoService/Echo`
+//!
+//! Example without prefixes:
+//! - Client announces: `drone-123/drone.EchoService/Echo`
+//! - Server responds: `drone-123/drone.EchoService/Echo`
 
 // Shared modules at root level
 mod connection;
